@@ -881,13 +881,9 @@ const INIT_TODOS=[{id:101,rowId:32,content:'旅館業中間検査 指摘事項�
 //  BOOT
 // ══════════════════════════════════════════════════════
 (async function(){
-  const savedUrl=localStorage.getItem(GAS_URL_KEY);
-  if(!savedUrl){
-    document.getElementById('setupScreen').style.display='flex';
-    hideLoading();
-    return;
-  }
-  GAS_URL=savedUrl;
+  // GAS URLを直接埋め込み（セットアップ不要）
+  GAS_URL = 'https://script.google.com/macros/s/AKfycbyjj_syYEsggUH3BOscOzlgHAgKXeK4CTGy_82SZtxGuM3grkIcNP8J2ljaeFK4V2hBRA/exec';
+  localStorage.setItem(GAS_URL_KEY, GAS_URL);
   showLoading('データを読み込み中...');
   try {
     await initFromGAS();
@@ -896,12 +892,19 @@ const INIT_TODOS=[{id:101,rowId:32,content:'旅館業中間検査 指摘事項�
     startAutoSync();
   } catch(e) {
     hideLoading();
-    // GAS接続失敗時はsetup画面に戻す
-    localStorage.removeItem(GAS_URL_KEY);
-    document.getElementById('setupScreen').style.display='flex';
-    document.getElementById('gasUrlInp').value=savedUrl;
-    document.getElementById('setupErr').textContent='接続に失敗しました。GASのURLを確認してください。';
-    document.getElementById('setupErr').style.display='block';
+    // エラー時はデータなしで起動
+    console.error('GAS接続エラー:', e);
+    rows  = JSON.parse(JSON.stringify(INIT_ROWS));
+    todos = JSON.parse(JSON.stringify(INIT_TODOS));
+    recalcIds();
+    showApp();
+    initDate(); buildCal(); buildTodo(); populateRowSelects();
+    // 右上にエラー表示
+    setTimeout(()=>{
+      const dot = document.getElementById('syncDot');
+      if(dot){ dot.className='sync-dot err'; dot.title='GAS接続失敗: '+e.message; }
+      toast('⚠ GAS接続失敗 — オフラインモードで起動');
+    }, 500);
   }
 })();
 </script>
