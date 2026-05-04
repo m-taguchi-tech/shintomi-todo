@@ -407,26 +407,34 @@ let pendingOps=[]; // オフライン時のキュー
 // ══════════════════════════════════════════════════════
 //  GAS通信
 // ══════════════════════════════════════════════════════
-// GASはGETのみで通信（CORS対応）
+// GASはGETのみで通信（CORS対応・リダイレクト追跡）
 async function gasCall(params){
-  // itemやitemsはJSONエンコードしてURLパラメータに乗せる
   const p = {};
   for(const [k,v] of Object.entries(params)){
-    p[k] = (typeof v === 'object') ? encodeURIComponent(JSON.stringify(v)) : v;
+    p[k] = (typeof v === 'object') ? JSON.stringify(v) : String(v);
   }
+  // URLSearchParams は自動エンコードする
   const url = GAS_URL + '?' + new URLSearchParams(p);
-  const r = await fetch(url, {redirect:'follow'});
-  if(!r.ok) throw new Error('HTTP '+r.status);
-  const data = await r.json();
-  if(data.ok === false) throw new Error(data.error || 'GAS error');
-  return data;
+  const ctrl = new AbortController();
+  const tid = setTimeout(()=>ctrl.abort(), 15000); // 15秒タイムアウト
+  try {
+    const r = await fetch(url, {redirect:'follow', signal:ctrl.signal});
+    clearTimeout(tid);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch(e){ throw new Error('GASの応答がJSONではありません: '+text.slice(0,100)); }
+    if(data && data.ok === false) throw new Error(data.error || 'GAS error');
+    return data;
+  } catch(e){
+    clearTimeout(tid);
+    if(e.name==='AbortError') throw new Error('タイムアウト（GASが応答しません）');
+    throw e;
+  }
 }
-// 後方互換エイリアス
 async function gasGet(params){ return gasCall(params); }
-async function gasPost(body){
-  // POSTの代わりにGETパラメータに変換
-  return gasCall(body);
-}
+async function gasPost(body){ return gasCall(body); }
 
 // ══════════════════════════════════════════════════════
 //  SETUP & INIT
@@ -445,7 +453,7 @@ async function connectGAS(){
     showApp();
   } catch(e) {
     hideLoading();
-    document.getElementById('setupErr').textContent='接続に失敗しました: '+e.message;
+    document.getElementById('setupErr').textContent='接続に失敗しました: '+e.message+' ／ GASのデプロイが「全員」になっているか確認してください';
     document.getElementById('setupErr').style.display='block';
   }
 }
@@ -456,8 +464,8 @@ async function initFromGAS(){
     const data = await gasCall({action:'get_all'});
     // rowsが空ならINIT_ROWSをシートに書き込む
     if(!data.rows || !data.rows.length){
-      await gasPost({action:'set_all', type:'rows',  items: INIT_ROWS});
-      await gasPost({action:'set_all', type:'todos', items: INIT_TODOS});
+      await gasCall({action:'set_all', type:'rows',  items: INIT_ROWS});
+      await gasCall({action:'set_all', type:'todos', items: INIT_TODOS});
       rows  = JSON.parse(JSON.stringify(INIT_ROWS));
       todos = JSON.parse(JSON.stringify(INIT_TODOS));
     } else {
@@ -467,7 +475,7 @@ async function initFromGAS(){
       const oldT = localStorage.getItem('sv3_todos') || localStorage.getItem('sv2_todos');
       if(oldT && !todos.length){
         const migTodos = JSON.parse(oldT);
-        await gasPost({action:'set_all', type:'todos', items: migTodos});
+        await gasCall({action:'set_all', type:'todos', items: migTodos});
         todos = migTodos;
         toast('📦 旧データを移行しました');
       }
