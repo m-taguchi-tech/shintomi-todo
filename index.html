@@ -934,8 +934,7 @@ async function parsePDFWithClaude(filename, base64data){
 }
 async function applyPDFRows(filename, found){
   const AREA_GUESS=[['サッシ下','是正工事'],['耐火被覆是正','是正工事'],['木柱金物','是正工事'],['バルコニー','外装工事'],['塗装','外装工事'],['ガラス','外装工事'],['シール','外装工事'],['左官','外装工事'],['ロングスパン','足場仮設'],['足場','足場仮設'],['仮囲い','足場仮設'],['LGS','内装工事'],['PB','内装工事'],['大工','内装工事'],['造作','内装工事'],['クロス','内装工事'],['タイル','内装工事'],['電気','内装工事'],['設備','内装工事'],['レベラー','内装工事'],['墨出し','内装工事'],['SD枠','内装工事'],['ラウンジ','1F2Fラウンジ'],['1F_','1F2Fラウンジ'],['自動ドア','1F2Fラウンジ'],['FFE','FFE造作'],['外構','外構工事'],['検査','検査・点検'],['消防','検査・点検'],['旅館業','検査・点検'],['オープン','運営']];
-  let updated=0,added=0;
-  let updated=0,added=0;
+  let updated=0, added=0;
   found.forEach(f=>{
     const ex=rows.find(r=>{ const rn=r.name.replace(/[_　\s]/g,''),fn=f.name.replace(/[_　\s]/g,''); return rn===fn||rn.includes(fn)||fn.includes(rn); });
     if(ex){ const changed=(ex.start!==f.start||ex.end!==f.end); ex.start=f.start; ex.end=f.end; if(changed) updated++; }
@@ -945,7 +944,8 @@ async function applyPDFRows(filename, found){
   await gasCall({action:'set_all',type:'rows',items:rows});
   const msg=`${filename} → ${found.length}件（更新:${updated} / 新規:${added}）`;
   const hitem={ts:nowStr(),title:'PDF更新: '+filename,changes:msg,badge:'pdf'};
-  history.unshift(hitem); await gasAddHistory(hitem);
+  history.unshift(hitem);
+  await gasCall({action:'add_history',item:hitem});
   hideLoading();
   toast(`✓ PDF読込完了 ${found.length}件`);
 }
