@@ -1010,27 +1010,40 @@ const INIT_TODOS=[{id:101,rowId:32,content:'旅館業中間検査 指摘事項�
 // ══════════════════════════════════════════════════════
 (async function(){
   showLoading('データを読み込み中...');
-  try {
-    const data = await gasCall({action:'get_all'});
-    rows    = data.rows    || [];
-    todos   = data.todos   || [];
-    history = data.history || [];
-    recalcIds();
-    showApp();
-    initDate(); buildCal(); buildTodo(); populateRowSelects();
-    setSyncState('ok');
-    startAutoSync();
-    toast('✅ 起動しました');
-  } catch(e){
+  // 10秒でタイムアウトしてフォールバック起動
+  const bootTimeout = setTimeout(()=>{
     hideLoading();
-    // エラー時はlocalStorageでフォールバック起動
     rows  = JSON.parse(JSON.stringify(INIT_ROWS));
     todos = JSON.parse(JSON.stringify(INIT_TODOS));
     recalcIds();
     showApp();
     initDate(); buildCal(); buildTodo(); populateRowSelects();
     setSyncState('err');
-    toast('⚠ オフライン起動: '+e.message);
+    toast('⚠ タイムアウト — ローカルで起動しました');
+  }, 10000);
+
+  try {
+    const data = await gasCall({action:'get_all'});
+    clearTimeout(bootTimeout);
+    rows    = data.rows    && data.rows.length    ? data.rows    : JSON.parse(JSON.stringify(INIT_ROWS));
+    todos   = data.todos   && data.todos.length   ? data.todos   : JSON.parse(JSON.stringify(INIT_TODOS));
+    history = data.history || [];
+    recalcIds();
+    showApp();
+    initDate(); buildCal(); buildTodo(); populateRowSelects();
+    setSyncState('ok');
+    startAutoSync();
+    toast('✅ 同期して起動しました');
+  } catch(e){
+    clearTimeout(bootTimeout);
+    hideLoading();
+    rows  = JSON.parse(JSON.stringify(INIT_ROWS));
+    todos = JSON.parse(JSON.stringify(INIT_TODOS));
+    recalcIds();
+    showApp();
+    initDate(); buildCal(); buildTodo(); populateRowSelects();
+    setSyncState('err');
+    toast('⚠ オフライン起動 — 同期なし');
   }
 })();
 </script>
