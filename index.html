@@ -424,38 +424,37 @@ let pendingOps=[]; // オフライン時のキュー
 //  GAS通信
 // ══════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════
-//  GAS通信（Googleアカウント認証付き・fetch with credentials）
+//  GAS通信：JSONPで呼び出し（CORS完全回避）
 // ══════════════════════════════════════════════════════
 const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyjj_syYEsggUH3BOscOzlgHAgKXeK4CTGy_82SZtxGuM3grkIcNP8J2ljaeFK4V2hBRA/exec';
 
-async function gasCall(params){
-  const p = {};
-  for(const [k,v] of Object.entries(params)){
-    p[k] = (typeof v === 'object') ? JSON.stringify(v) : String(v);
-  }
-  const url = GAS_ENDPOINT + '?' + new URLSearchParams(p);
-  const ctrl = new AbortController();
-  const tid = setTimeout(()=>ctrl.abort(), 20000);
-  try {
-    // credentials:'include' でGoogleセッションクッキーを送る
-    const r = await fetch(url, {
-      redirect: 'follow',
-      credentials: 'include',
-      signal: ctrl.signal
-    });
-    clearTimeout(tid);
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const text = await r.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch(e){ throw new Error('GAS応答エラー: '+text.slice(0,200)); }
-    if(data && data.ok === false) throw new Error(data.error||'GAS error');
-    return data;
-  } catch(e){
-    clearTimeout(tid);
-    if(e.name==='AbortError') throw new Error('タイムアウト');
-    throw e;
-  }
+function gasCall(params){
+  return new Promise((resolve, reject)=>{
+    const cbName = 'gcb_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const p = {callback: cbName};
+    for(const [k,v] of Object.entries(params)){
+      p[k] = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+    }
+    const url = GAS_ENDPOINT + '?' + new URLSearchParams(p);
+    const script = document.createElement('script');
+    const tid = setTimeout(()=>{
+      cleanup();
+      reject(new Error('タイムアウト'));
+    }, 20000);
+    window[cbName] = (data)=>{
+      cleanup();
+      if(data && data.ok===false) reject(new Error(data.error||'GAS error'));
+      else resolve(data);
+    };
+    function cleanup(){
+      clearTimeout(tid);
+      delete window[cbName];
+      if(script.parentNode) script.parentNode.removeChild(script);
+    }
+    script.onerror = ()=>{ cleanup(); reject(new Error('スクリプト読み込みエラー')); };
+    script.src = url;
+    document.head.appendChild(script);
+  });
 }
 async function gasGet(params){ return gasCall(params); }
 async function gasPost(body){ return gasCall(body); }
