@@ -881,22 +881,60 @@ document.getElementById('histBtn').onclick=showHistModal;
 // ══════════════════════════════════════════════════════
 function loadPDF(event){
   const file=event.target.files[0]; if(!file) return;
+  toast('📄 PDFを解析中...');
   const reader=new FileReader();
-  reader.onload=e=>parsePDFText(file.name,e.target.result);
-  reader.readAsText(file,'UTF-8');
+  reader.onload=async e=>{
+    const base64 = e.target.result.split(',')[1];
+    await parsePDFWithClaude(file.name, base64);
+  };
+  reader.readAsDataURL(file);
   event.target.value='';
 }
-async function parsePDFText(filename,text){
-  const found=[];
-  const re=/([^\n\r]{3,50}?)\s+(\d{4})\/(\d{2})\/(\d{2})\s*[~〜～]\s*(\d{4})\/(\d{2})\/(\d{2})/g;
-  let m;
-  while((m=re.exec(text))!==null){
-    const name=m[1].trim().replace(/\s+/g,' ');
-    if(name.length<3||/^[\d\s月火水木金土日年\/\-]+$/.test(name)) continue;
-    found.push({name,start:`${m[2]}-${m[3]}-${m[4]}`,end:`${m[5]}-${m[6]}-${m[7]}`});
+async function parsePDFWithClaude(filename, base64data){
+  showLoading('Claude AIがPDFを解析中...');
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages:[{
+          role:'user',
+          content:[
+            {
+              type:'document',
+              source:{ type:'base64', media_type:'application/pdf', data: base64data }
+            },
+            {
+              type:'text',
+              text:`このANDPAD工程表PDFから工程データを抽出してください。
+必ずJSON配列のみを返してください（説明文は不要）。
+形式: [{"name":"工程名","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}]
+・日付がない工程は除外
+・開始日・終了日が両方ある工程のみ含める
+・工程名は日本語のまま`
+            }
+          ]
+        }]
+      })
+    });
+    const data = await res.json();
+    const text = data.content[0].text.trim();
+    // JSON部分を抽出
+    const match = text.match(/\[[\s\S]*\]/);
+    if(!match) throw new Error('JSONが見つかりません');
+    const found = JSON.parse(match[0]);
+    if(!found.length){ hideLoading(); toast('工程データが見つかりませんでした'); return; }
+    await applyPDFRows(filename, found);
+  } catch(e){
+    hideLoading();
+    toast('⚠ PDF解析失敗: '+e.message);
   }
-  if(!found.length){ toast('PDF解析: 工程を読み取れませんでした'); return; }
+}
+async function applyPDFRows(filename, found){
   const AREA_GUESS=[['サッシ下','是正工事'],['耐火被覆是正','是正工事'],['木柱金物','是正工事'],['バルコニー','外装工事'],['塗装','外装工事'],['ガラス','外装工事'],['シール','外装工事'],['左官','外装工事'],['ロングスパン','足場仮設'],['足場','足場仮設'],['仮囲い','足場仮設'],['LGS','内装工事'],['PB','内装工事'],['大工','内装工事'],['造作','内装工事'],['クロス','内装工事'],['タイル','内装工事'],['電気','内装工事'],['設備','内装工事'],['レベラー','内装工事'],['墨出し','内装工事'],['SD枠','内装工事'],['ラウンジ','1F2Fラウンジ'],['1F_','1F2Fラウンジ'],['自動ドア','1F2Fラウンジ'],['FFE','FFE造作'],['外構','外構工事'],['検査','検査・点検'],['消防','検査・点検'],['旅館業','検査・点検'],['オープン','運営']];
+  let updated=0,added=0;
   let updated=0,added=0;
   found.forEach(f=>{
     const ex=rows.find(r=>{ const rn=r.name.replace(/[_　\s]/g,''),fn=f.name.replace(/[_　\s]/g,''); return rn===fn||rn.includes(fn)||fn.includes(rn); });
@@ -908,6 +946,7 @@ async function parsePDFText(filename,text){
   const msg=`${filename} → ${found.length}件（更新:${updated} / 新規:${added}）`;
   const hitem={ts:nowStr(),title:'PDF更新: '+filename,changes:msg,badge:'pdf'};
   history.unshift(hitem); await gasAddHistory(hitem);
+  hideLoading();
   toast(`✓ PDF読込完了 ${found.length}件`);
 }
 
