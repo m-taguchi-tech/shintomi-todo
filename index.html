@@ -408,69 +408,38 @@ let pendingOps=[]; // オフライン時のキュー
 //  GAS通信
 // ══════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════
-//  ストレージ：localStorage（オフライン）+ 定期的にGoogleスプレッドシートCSVで同期
+//  GAS通信（Googleアカウント認証付き・fetch with credentials）
 // ══════════════════════════════════════════════════════
-const SS_ID = '1bFASzHbI6-Zr9qntrCDKn1FNJG9qQsNyUt-I70IL1AA';
-// シートGID（タブのID）— スプレッドシートのURLのgid=の値
-const GID_ROWS  = '0';       // 1枚目のシート（rows）
-const GID_TODOS = '1';       // todosシート
-const LS_ROWS   = 'st_rows_v4';
-const LS_TODOS  = 'st_todos_v4';
-const LS_HIST   = 'st_hist_v4';
+const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyjj_syYEsggUH3BOscOzlgHAgKXeK4CTGy_82SZtxGuM3grkIcNP8J2ljaeFK4V2hBRA/exec';
 
-function lsSave(){
-  try{
-    localStorage.setItem(LS_ROWS,  JSON.stringify(rows));
-    localStorage.setItem(LS_TODOS, JSON.stringify(todos));
-    localStorage.setItem(LS_HIST,  JSON.stringify(history.slice(0,50)));
-  }catch(e){}
-}
-function lsLoad(){
-  try{
-    const r=localStorage.getItem(LS_ROWS);
-    const t=localStorage.getItem(LS_TODOS);
-    const h=localStorage.getItem(LS_HIST);
-    if(r) rows=JSON.parse(r);
-    if(t) todos=JSON.parse(t);
-    if(h) history=JSON.parse(h);
-  }catch(e){}
-}
-
-// gasCall は localStorage保存のみ（GASなし）
 async function gasCall(params){
-  const action = params.action||'';
-  if(action==='get_all'){
-    return {ok:true, rows:rows, todos:todos, history:history};
+  const p = {};
+  for(const [k,v] of Object.entries(params)){
+    p[k] = (typeof v === 'object') ? JSON.stringify(v) : String(v);
   }
-  if(action==='upsert'){
-    const item=params.item;
-    const type=params.type;
-    if(type==='rows'){
-      const i=rows.findIndex(x=>+x.id===+item.id);
-      if(i>=0) rows[i]=item; else rows.push(item);
-    } else if(type==='todos'){
-      const i=todos.findIndex(x=>+x.id===+item.id);
-      if(i>=0) todos[i]=item; else todos.push(item);
-    }
-    lsSave(); return {ok:true};
+  const url = GAS_ENDPOINT + '?' + new URLSearchParams(p);
+  const ctrl = new AbortController();
+  const tid = setTimeout(()=>ctrl.abort(), 20000);
+  try {
+    // credentials:'include' でGoogleセッションクッキーを送る
+    const r = await fetch(url, {
+      redirect: 'follow',
+      credentials: 'include',
+      signal: ctrl.signal
+    });
+    clearTimeout(tid);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch(e){ throw new Error('GAS応答エラー: '+text.slice(0,200)); }
+    if(data && data.ok === false) throw new Error(data.error||'GAS error');
+    return data;
+  } catch(e){
+    clearTimeout(tid);
+    if(e.name==='AbortError') throw new Error('タイムアウト');
+    throw e;
   }
-  if(action==='delete'){
-    const id=params.id, type=params.type;
-    if(type==='rows')  rows  = rows.filter(x=>+x.id!==+id);
-    if(type==='todos') todos = todos.filter(x=>+x.id!==+id);
-    lsSave(); return {ok:true};
-  }
-  if(action==='set_all'){
-    const type=params.type, items=params.items;
-    if(type==='rows')  rows=items;
-    if(type==='todos') todos=items;
-    lsSave(); return {ok:true};
-  }
-  if(action==='add_history'){
-    history.unshift(params.item);
-    lsSave(); return {ok:true};
-  }
-  return {ok:true};
 }
 async function gasGet(params){ return gasCall(params); }
 async function gasPost(body){ return gasCall(body); }
@@ -920,22 +889,38 @@ const INIT_TODOS=[{id:101,rowId:32,content:'旅館業中間検査 指摘事項�
 //  BOOT
 // ══════════════════════════════════════════════════════
 (async function(){
-  // localStorage から読み込む（GASなし）
-  lsLoad();
-  if(!rows.length){
+  showLoading('データを読み込み中...');
+  try {
+    const data = await gasCall({action:'get_all'});
+    if(!data.rows||!data.rows.length){
+      await gasCall({action:'set_all',type:'rows',  items:INIT_ROWS});
+      await gasCall({action:'set_all',type:'todos', items:INIT_TODOS});
+      rows  = JSON.parse(JSON.stringify(INIT_ROWS));
+      todos = JSON.parse(JSON.stringify(INIT_TODOS));
+    } else {
+      rows    = data.rows    || [];
+      todos   = data.todos   || [];
+      history = data.history || [];
+    }
+    recalcIds();
+    showApp();
+    initDate(); buildCal(); buildTodo(); populateRowSelects();
+    setSyncState('ok');
+    startAutoSync();
+    toast('✅ 同期完了');
+  } catch(e){
+    // GAS失敗時はフォールバック（localStorageから）
+    console.warn('GAS接続失敗、ローカルで起動:', e.message);
     rows  = JSON.parse(JSON.stringify(INIT_ROWS));
     todos = JSON.parse(JSON.stringify(INIT_TODOS));
-    lsSave();
+    recalcIds();
+    showApp();
+    initDate(); buildCal(); buildTodo(); populateRowSelects();
+    setSyncState('err');
+    toast('⚠ オフラインで起動（Googleログインが必要かもしれません）');
+    hideLoading();
   }
-  recalcIds();
-  showApp();
-  initDate(); buildCal(); buildTodo(); populateRowSelects();
-  setSyncState('ok');
-  // ダミーのstartAutoSync（localStorage版）
-  setInterval(()=>{ setSyncState('ok'); }, 30000);
-  toast('✅ アプリを起動しました');
 })();
-// dummy below
 </script>
 </body>
 </html>
