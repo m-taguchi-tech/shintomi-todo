@@ -247,7 +247,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       <div class="sync-dot" id="syncDot" title="同期状態"></div>
       <button class="tbtn" id="histBtn" onclick="openModal('histModal')">履歴</button>
       <button class="tbtn" onclick="openAddRow()">＋工程</button>
-      <label class="tbtn" style="cursor:pointer;">📄PDF<input type="file" id="pdfInput" accept=".pdf" style="display:none" onchange="loadPDF(event)"></label>
+      <button class="tbtn" onclick="toast('PDFはClaudeチャットに貼って「工程を更新して」と伝えてください')" title="PDFはClaudeで更新">📄PDF更新↗</button>
       <button class="tbtn" onclick="forceSync()" title="手動同期">↻</button>
     </div>
   </div>
@@ -386,6 +386,29 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
     </button>
     <div id="loginErr" style="font-size:11px;color:#c82828;margin-top:8px;display:none;"></div>
     <div style="font-size:11px;color:#8892a8;margin-top:16px;">トグルホールディングスのアカウント<br>または個人のGoogleアカウントで利用できます</div>
+  </div>
+</div>
+
+
+<!-- APIキー入力モーダル -->
+<div class="overlay" id="apiKeyModal">
+  <div class="modal" style="max-width:420px;">
+    <div class="mtitle">🔑 Claude API キーを設定</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.7;">
+      PDFの自動解析にClaude APIキーが必要です。<br>
+      キーはこのブラウザにのみ保存され、GitHubには送信されません。
+    </div>
+    <div class="mf">
+      <div class="ml">API キー</div>
+      <input class="mi" id="apiKeyInp" type="password" placeholder="sk-ant-api03-...">
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">
+      <a href="https://console.anthropic.com" target="_blank" style="color:var(--blue);">console.anthropic.com</a> で取得できます
+    </div>
+    <div class="mrow-actions">
+      <button class="mbsave" onclick="saveApiKey()">保存して解析開始</button>
+      <button class="mbcancel" onclick="closeModal('apiKeyModal')">キャンセル</button>
+    </div>
   </div>
 </div>
 
@@ -991,6 +1014,22 @@ function doGoogleLogin(){
       setTimeout(()=>location.reload(), 1500);
     }
   }, 300);
+}
+
+
+// ── API キー管理 ──────────────────────────────────────
+function showApiKeyModal(){
+  document.getElementById('apiKeyModal').classList.add('open');
+  setTimeout(()=>document.getElementById('apiKeyInp').focus(),80);
+}
+async function saveApiKey(){
+  const key = document.getElementById('apiKeyInp').value.trim();
+  if(!key.startsWith('sk-ant-')){ toast('正しいAPIキーを入力してください'); return; }
+  localStorage.setItem('anthropic_api_key', key);
+  closeModal('apiKeyModal');
+  document.getElementById('apiKeyInp').value='';
+  // PDF解析を再実行（ファイル選択からやり直し）
+  toast('✅ APIキーを保存しました。もう一度PDFをアップロードしてください。');
 }
 
 let _tt;
